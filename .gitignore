@@ -1,0 +1,5 @@
+build/
+fooyin-install/
+fooyin-sdk/
+*.fyplugin
+*.so
