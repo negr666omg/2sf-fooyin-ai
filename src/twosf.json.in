@@ -4,7 +4,7 @@
     "Author": "negr666omg",
     "Copyright": ["Copyright © 2026 negr666omg"],
     "License": [
-        "This plugin is free software under the GNU General Public License version 3 or later.",
+        "This plugin is free software under the GNU General Public License version 2 or later.",
         "It is distributed without any warranty; see COPYING for details."
     ],
     "Category": "Audio.Input",
