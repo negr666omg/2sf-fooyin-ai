@@ -1,5 +1,7 @@
 #pragma once
 
+#include "twosfdefs.h"
+
 #include <core/coresettings.h>
 #include <core/engine/audioinput.h>
 
