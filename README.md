@@ -26,8 +26,8 @@ Download `fooyin-2sf-linux-x64.fyplugin` from [GitHub Actions artifacts](https:/
 
 ## Third-party code and licenses
 
-- This plugin: GPL-3.0-or-later. See `COPYING`.
+- This plugin: GPL-2.0-or-later. See `COPYING`.
 - Vio2SF / DeSmuME-derived core and Kodi 2SF decoder integration: GPL-2.0-or-later; their upstream licence texts are included in the bundle.
 - PSFLib: MIT. See `LICENSES/PSFLib-MIT.txt`.
 
-The GPL-3.0-or-later licence is compatible with the GPL-2.0-or-later Vio2SF code. Corresponding source is available in this repository.
+The GPL-2.0-or-later licence is compatible with the GPL-2.0-or-later Vio2SF code. Corresponding source is available in this repository.
