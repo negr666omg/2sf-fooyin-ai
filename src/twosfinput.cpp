@@ -2,8 +2,12 @@
 #include "twosfdefs.h"
 
 #include <psflib.h>
-#include <state.h>
+
+// Match Vio2SF's own include order to avoid duplicate SoundInterface_struct.
+#define _SPU_CPP_
 #include <SPU.h>
+#include <state.h>
+#undef _SPU_CPP_
 
 #include <QByteArray>
 #include <QDir>
