@@ -1,0 +1,121 @@
+name: Build Linux plugin
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    name: Build fooyin 2SF plugin (Linux x86_64)
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    env:
+      FOOYIN_SDK_RELEASE: nightly
+      FOOYIN_PREFIX: ${{ github.workspace }}/fooyin-install
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential git cmake ninja-build pkg-config ca-certificates \
+            xz-utils qt6-base-dev libqt6svg6 libqt6sql6-sqlite \
+            libavcodec-dev libavfilter9 libavformat-dev libavutil-dev \
+            libswresample-dev libicu74 libtag1v5 libarchive13t64 \
+            libmpg123-dev libvorbis-dev libspeex-dev zlib1g-dev \
+            libqcoro6core0t64 libqcoro6network0t64
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Download fooyin SDK
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: fooyin/fooyin
+          tag: ${{ env.FOOYIN_SDK_RELEASE }}
+          fileName: fooyin-sdk-*-linux-x64-qt6.4.tar.xz
+          out-file-path: fooyin-sdk
+
+      - name: Extract SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          archives=(fooyin-sdk/*.tar.xz)
+          if [[ ${#archives[@]} -ne 1 ]]; then
+            echo "Expected exactly one fooyin Linux Qt 6.4 SDK archive" >&2
+            ls -la fooyin-sdk
+            exit 1
+          fi
+          mkdir -p "$FOOYIN_PREFIX"
+          tar -xJf "${archives[0]}" -C "$FOOYIN_PREFIX" --strip-components=1
+          cat "$FOOYIN_PREFIX/sdk-manifest.json"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$FOOYIN_PREFIX" \
+            -DBUILD_PLUGIN_BUNDLE=ON
+
+      - name: Compile plugin
+        run: cmake --build build --parallel 2
+
+      - name: Package fooyin installer
+        run: cmake --build build --target package_plugin
+
+      - name: Stage build files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          bundle=build/fooyin-2sf-linux-x64.fyplugin
+          if [[ ! -f "$bundle" ]]; then
+            find build -maxdepth 4 -name '*.fyplugin' -print
+            echo "The .fyplugin package was not produced" >&2
+            exit 1
+          fi
+          cp "$bundle" dist/
+          plugin_so=build/fyplugin_twosf.so
+          if [[ ! -e "$plugin_so" ]]; then
+            find build -name 'fyplugin_twosf.so*' -print
+            echo "Expected build/fyplugin_twosf.so" >&2
+            exit 1
+          fi
+          cp -L "$plugin_so" dist/fooyin-2sf-linux-x86_64.so
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fooyin-2sf-linux-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  publish-release-assets:
+    name: Attach Linux binaries to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs: [build-linux]
+    steps:
+      - name: Download build files
+        uses: actions/download-artifact@v4
+        with:
+          name: fooyin-2sf-linux-x86_64
+          path: dist
+      - name: Attach assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/fooyin-2sf-linux-x64.fyplugin
+            dist/fooyin-2sf-linux-x86_64.so
+            dist/SHA256SUMS
