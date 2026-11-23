@@ -1,0 +1,13 @@
+{
+    "Name": "2SF",
+    "Version": "@PROJECT_VERSION@",
+    "Author": "negr666omg",
+    "Copyright": ["Copyright © 2026 negr666omg"],
+    "License": [
+        "This plugin is free software under the GNU General Public License version 3 or later.",
+        "It is distributed without any warranty; see COPYING for details."
+    ],
+    "Category": "Audio.Input",
+    "Description": "Nintendo DS 2SF and MINI2SF decoder powered by Vio2SF",
+    "Url": "https://github.com/negr666omg/2sf-fooyin-ai"
+}
