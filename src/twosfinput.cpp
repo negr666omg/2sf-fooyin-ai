@@ -3,6 +3,7 @@
 
 #include <psflib.h>
 #include <state.h>
+#include <SPU.h>
 
 #include <QByteArray>
 #include <QDir>
@@ -27,7 +28,7 @@ Q_LOGGING_CATEGORY(TWOSF, "fy.twosf")
 namespace Fooyin::TwoSF {
 namespace {
 constexpr int PsfVersion2SF = 0x24;
-constexpr int RenderChunkFrames = 1024;
+constexpr int RenderChunkFrames = 8192;
 constexpr size_t MaxPsfSaveBytes = 256U * 1024U * 1024U;
 // Vio2SF contains legacy translation-unit globals (notably resampler setup).
 // Serialise all core entry points so Fooyin's gapless predecode cannot race them.
@@ -386,6 +387,27 @@ psf_file_callbacks makePsfCallbacks(PsfIoContext& context) {
     return callbacks;
 }
 
+// Switch the quality of existing resamplers as well as the mode used for
+// channels that are started while seeking. Quality changes only affect the
+// generated audio samples, not DS CPU/timer execution.
+void setEmulatorInterpolation(NDS_state* state, int quality) {
+    if(!state) {
+        return;
+    }
+
+    state->dwInterpolation = static_cast<unsigned long>(quality);
+    if(!state->SPU_core) {
+        return;
+    }
+
+    for(channel_struct& channel : state->SPU_core->channels) {
+        if(channel.resampler) {
+            const int channelQuality = channel.format == 3 ? RESAMPLER_QUALITY_BLEP : quality;
+            resampler_set_quality(channel.resampler, channelQuality);
+        }
+    }
+}
+
 bool loadPsf(const AudioSource& source, TwosfLoaderState* loader, TwosfTags* tags, bool includeNestedTags) {
     PsfIoContext context{source, normalisedName(source.filepath)};
     psf_file_callbacks callbacks = makePsfCallbacks(context);
@@ -587,17 +609,8 @@ void TwoSFDecoder::renderFrames(int16_t* destination, int frames) {
     if(!m_emu || !destination || frames <= 0) {
         return;
     }
-    int remaining = frames;
-    int16_t* output = destination;
-    while(remaining > 0) {
-        const int count = std::min(remaining, RenderChunkFrames);
-        {
-            const std::lock_guard lock{Vio2sfMutex};
-            state_render(m_emu.get(), output, static_cast<unsigned int>(count));
-        }
-        output += count * 2;
-        remaining -= count;
-    }
+    const std::lock_guard lock{Vio2sfMutex};
+    state_render(m_emu.get(), destination, static_cast<unsigned int>(frames));
 }
 
 uint64_t TwoSFDecoder::finiteLengthFrames() const {
@@ -651,12 +664,28 @@ void TwoSFDecoder::seek(uint64_t positionMs) {
         m_positionFrames = 0;
     }
 
-    std::vector<int16_t> discard(RenderChunkFrames * 2);
-    while(m_positionFrames < target) {
-        const uint64_t remaining = target - m_positionFrames;
-        const int count = static_cast<int>(std::min<uint64_t>(remaining, RenderChunkFrames));
-        renderFrames(discard.data(), count);
-        m_positionFrames += static_cast<uint64_t>(count);
+    if(m_positionFrames < target) {
+        std::vector<int16_t> discard(static_cast<size_t>(RenderChunkFrames) * 2U);
+
+        // Seeking does not need high-quality resampling for samples that are
+        // immediately discarded. Use the cheapest mode during the fast-forward,
+        // then restore the user's selected quality before audible playback.
+        {
+            const std::lock_guard lock{Vio2sfMutex};
+            setEmulatorInterpolation(m_emu.get(), RESAMPLER_QUALITY_ZOH);
+        }
+
+        while(m_positionFrames < target) {
+            const uint64_t remaining = target - m_positionFrames;
+            const int count = static_cast<int>(std::min<uint64_t>(remaining, RenderChunkFrames));
+            renderFrames(discard.data(), count);
+            m_positionFrames += static_cast<uint64_t>(count);
+        }
+
+        {
+            const std::lock_guard lock{Vio2sfMutex};
+            setEmulatorInterpolation(m_emu.get(), m_interpolation);
+        }
     }
 }
 
@@ -743,12 +772,11 @@ bool TwoSFReader::init(const AudioSource& source) {
 }
 
 bool TwoSFReader::readTrack(const AudioSource& source, Track& track) {
-    TwosfLoaderState validationData;
     TwosfTags tags;
-    if(!loadPsf(source, &validationData, &tags, true)) {
-        return false;
-    }
-    if(validationData.romSize == 0 && validationData.stateSize == 0) {
+    // Metadata scans only need tags from the selected MINI2SF/2SF file.
+    // With no load callback PSFLib skips dependency loading and decompression,
+    // matching Kodi's own lightweight ReadTag/Init path.
+    if(!loadPsf(source, nullptr, &tags, false)) {
         return false;
     }
 
